@@ -12,11 +12,14 @@ COPY ./entrypoint.sh /app/
 # Set permissions to ensure the non-root user can execute the entrypoint
 RUN chmod +x /app/entrypoint.sh
 
-# Set the ownership of /app to ensure it is writable by any user
+# Set the ownership of /app to user:user
 RUN chown -R user:user /app
 
-# Set permissions to ensure /app is writable by any user (UID 1000)
-RUN chmod -R 777 /app
+# Make the /app directory writable by the group and others
+RUN chmod -R 775 /app
+
+# Ensure the /app/kafka directory is writable by UID 1000
+RUN mkdir -p /app/kafka && chown -R 1000:1000 /app/kafka && chmod -R 775 /app/kafka
 
 # Switch to the non-root user
 USER user
