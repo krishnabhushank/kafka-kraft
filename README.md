@@ -225,7 +225,7 @@ spec:
 ```
 
 ---
-As a `Stateful Set`
+## As a `Stateful Set`
 
 Converting the above Kubernetes `Deployment` configurations to a `StatefulSet` configuration makes sense for Kafka, as it benefits from stable network identities and persistent storage. Here’s how you can convert it to use a `StatefulSet`:
 
@@ -334,3 +334,121 @@ In these configurations:
 - Port mappings are adjusted to use Kubernetes service ports.
 
 Make sure to replace `${IMAGE}` with the actual Kafka image you intend to use. Additionally, you might need to adjust other configurations based on your specific requirements and Kubernetes cluster setup.
+
+---
+## With Mount Volumes
+To incorporate the volumes `/etc/kafka/secrets`, `/var/lib/kafka/data`, and `/mnt/shared/config` into the Kubernetes StatefulSet, you'll need to add corresponding volume mounts and PersistentVolumeClaims for each. Here is the updated configuration:
+
+### Kafka StatefulSet and Service
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+  labels:
+    app: kafka
+spec:
+  ports:
+    - port: 9092
+      name: client
+    - port: 9093
+      name: controller
+  clusterIP: None
+  selector:
+    app: kafka
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+spec:
+  serviceName: "kafka-headless"
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      containers:
+        - name: kafka
+          image: ${IMAGE}
+          ports:
+            - containerPort: 9092
+              name: client
+            - containerPort: 9093
+              name: controller
+          env:
+            - name: KAFKA_NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: KAFKA_PROCESS_ROLES
+              value: "broker,controller"
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: "1@kafka-0.kafka-headless:9093,2@kafka-1.kafka-headless:9093,3@kafka-2.kafka-headless:9093"
+            - name: KAFKA_LISTENERS
+              value: "PLAINTEXT://:19092,CONTROLLER://:9093,PLAINTEXT_HOST://:9092"
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: "PLAINTEXT"
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: "PLAINTEXT://$(KAFKA_NODE_ID).kafka-headless:19092,PLAINTEXT_HOST://localhost:$(($(KAFKA_NODE_ID) + 1) * 10000 + 9092)"
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: "CONTROLLER"
+            - name: CLUSTER_ID
+              value: "4L6g3nShT-eMCtK--X86sw"
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
+              value: "0"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_LOG_DIRS
+              value: "/var/lib/kafka/data"
+          volumeMounts:
+            - name: kafka-storage
+              mountPath: /var/lib/kafka/data
+            - name: kafka-secrets
+              mountPath: /etc/kafka/secrets
+            - name: kafka-config
+              mountPath: /mnt/shared/config
+  volumeClaimTemplates:
+    - metadata:
+        name: kafka-storage
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        resources:
+          requests:
+            storage: 10Gi
+    - metadata:
+        name: kafka-secrets
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        resources:
+          requests:
+            storage: 1Gi
+    - metadata:
+        name: kafka-config
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        resources:
+          requests:
+            storage: 1Gi
+```
+
+### Explanation:
+
+1. **Headless Service**: The same headless service named `kafka-headless` is used to manage the network identities of the Kafka pods.
+2. **StatefulSet**: The `StatefulSet` named `kafka` is defined with 3 replicas.
+3. **Environment Variables**: The `KAFKA_NODE_ID` is dynamically assigned based on the pod name using a `fieldRef`.
+4. **Volume Mounts**: Three volume mounts are added for `/var/lib/kafka/data`, `/etc/kafka/secrets`, and `/mnt/shared/config`.
+5. **PersistentVolumeClaims**: Three `PersistentVolumeClaim` templates are specified for persistent storage for each of the volumes.
+
+Make sure to replace `${IMAGE}` with the actual Kafka image name you intend to use. Additionally, adjust the storage sizes and other configurations based on your specific requirements and Kubernetes cluster setup.
