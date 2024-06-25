@@ -339,6 +339,8 @@ Make sure to replace `${IMAGE}` with the actual Kafka image you intend to use. A
 ## With Mount Volumes
 To incorporate the volumes `/etc/kafka/secrets`, `/var/lib/kafka/data`, and `/mnt/shared/config` into the Kubernetes StatefulSet, you'll need to add corresponding volume mounts and PersistentVolumeClaims for each. Here is the updated configuration:
 
+If your StatefulSet is named `coml-5805-apache-kafka`, the pods will be named `coml-5805-apache-kafka-0`, `coml-5805-apache-kafka-1`, and `coml-5805-apache-kafka-2`. You can dynamically derive the node ID from the pod name by extracting the index from the pod name. Here's the updated StatefulSet configuration that uses the correct pod name and environment variables:
+
 ### Kafka StatefulSet and Service
 
 ```yaml
@@ -361,7 +363,7 @@ spec:
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: kafka
+  name: coml-5805-apache-kafka
 spec:
   serviceName: "kafka-headless"
   replicas: 3
@@ -386,18 +388,24 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            - name: KAFKA_NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: KAFKA_NODE_ID
+              value: "$(hostname | awk -F '-' '{print $NF}')"
             - name: KAFKA_PROCESS_ROLES
               value: "broker,controller"
             - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
               value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
             - name: KAFKA_CONTROLLER_QUORUM_VOTERS
-              value: "1@kafka-0.kafka-headless:9093,2@kafka-1.kafka-headless:9093,3@kafka-2.kafka-headless:9093"
+              value: "1@coml-5805-apache-kafka-0.coml-5805-apache-kafka:9093,2@coml-5805-apache-kafka-1.coml-5805-apache-kafka:9093,3@coml-5805-apache-kafka-2.coml-5805-apache-kafka:9093"
             - name: KAFKA_LISTENERS
               value: "PLAINTEXT://:19092,CONTROLLER://:9093,PLAINTEXT_HOST://:9092"
             - name: KAFKA_INTER_BROKER_LISTENER_NAME
               value: "PLAINTEXT"
             - name: KAFKA_ADVERTISED_LISTENERS
-              value: "PLAINTEXT://$(KAFKA_NODE_ID).kafka-headless:19092,PLAINTEXT_HOST://localhost:$(($(KAFKA_NODE_ID) + 1) * 10000 + 9092)"
+              value: "PLAINTEXT://coml-5805-apache-kafka-$(hostname | awk -F '-' '{print $NF}').coml-5805-apache-kafka:19092,PLAINTEXT_HOST://localhost:$(($(hostname | awk -F '-' '{print $NF}') + 1) * 10000 + 9092)"
             - name: KAFKA_CONTROLLER_LISTENER_NAMES
               value: "CONTROLLER"
             - name: CLUSTER_ID
@@ -445,9 +453,9 @@ spec:
 
 ### Explanation:
 
-1. **Headless Service**: The same headless service named `kafka-headless` is used to manage the network identities of the Kafka pods.
-2. **StatefulSet**: The `StatefulSet` named `kafka` is defined with 3 replicas.
-3. **Environment Variables**: The `KAFKA_NODE_ID` is dynamically assigned based on the pod name using a `fieldRef`.
+1. **Headless Service**: The headless service named `kafka-headless` is used to manage the network identities of the Kafka pods without a ClusterIP.
+2. **StatefulSet**: The `StatefulSet` named `coml-5805-apache-kafka` is defined with 3 replicas.
+3. **Environment Variables**: The `KAFKA_NODE_ID` is dynamically assigned based on the pod name using the `hostname` command with `awk` to extract the index from the pod name.
 4. **Volume Mounts**: Three volume mounts are added for `/var/lib/kafka/data`, `/etc/kafka/secrets`, and `/mnt/shared/config`.
 5. **PersistentVolumeClaims**: Three `PersistentVolumeClaim` templates are specified for persistent storage for each of the volumes.
 
