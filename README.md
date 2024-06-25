@@ -224,6 +224,109 @@ spec:
       targetPort: 9092
 ```
 
+---
+As a `Stateful Set`
+
+Converting the above Kubernetes `Deployment` configurations to a `StatefulSet` configuration makes sense for Kafka, as it benefits from stable network identities and persistent storage. Here’s how you can convert it to use a `StatefulSet`:
+
+### Kafka StatefulSet and Service
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+  labels:
+    app: kafka
+spec:
+  ports:
+    - port: 9092
+      name: client
+    - port: 9093
+      name: controller
+  clusterIP: None
+  selector:
+    app: kafka
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+spec:
+  serviceName: "kafka-headless"
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      containers:
+        - name: kafka
+          image: ${IMAGE}
+          ports:
+            - containerPort: 9092
+              name: client
+            - containerPort: 9093
+              name: controller
+          env:
+            - name: KAFKA_NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: KAFKA_PROCESS_ROLES
+              value: "broker,controller"
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: "1@kafka-0.kafka-headless:9093,2@kafka-1.kafka-headless:9093,3@kafka-2.kafka-headless:9093"
+            - name: KAFKA_LISTENERS
+              value: "PLAINTEXT://:19092,CONTROLLER://:9093,PLAINTEXT_HOST://:9092"
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: "PLAINTEXT"
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: "PLAINTEXT://$(KAFKA_NODE_ID).kafka-headless:19092,PLAINTEXT_HOST://localhost:$(($(KAFKA_NODE_ID) + 1) * 10000 + 9092)"
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: "CONTROLLER"
+            - name: CLUSTER_ID
+              value: "4L6g3nShT-eMCtK--X86sw"
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
+              value: "0"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_LOG_DIRS
+              value: "/tmp/kraft-combined-logs"
+          volumeMounts:
+            - name: kafka-storage
+              mountPath: /tmp/kraft-combined-logs
+  volumeClaimTemplates:
+    - metadata:
+        name: kafka-storage
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        resources:
+          requests:
+            storage: 1Gi
+```
+
+### Explanation:
+
+1. **Headless Service**: A headless service named `kafka-headless` is created to manage the network identities of the Kafka pods without a ClusterIP.
+2. **StatefulSet**: A `StatefulSet` named `kafka` is defined with 3 replicas.
+3. **Environment Variables**: The `KAFKA_NODE_ID` is dynamically assigned based on the pod name using a `fieldRef`. This allows each pod to have a unique ID.
+4. **Volume Claim Templates**: A `PersistentVolumeClaim` template is specified to provide persistent storage for each Kafka broker.
+
+### Ports Mapping and Advertised Listeners:
+- The ports are configured directly on the Kafka container.
+- The `KAFKA_ADVERTISED_LISTENERS` environment variable is adjusted to use the pod name and dynamically calculate the host port.
+
+Make sure to replace `${IMAGE}` with the actual Kafka image name you intend to use. Additionally, adjust the storage size and other configurations based on your specific requirements and Kubernetes cluster setup.
 In these configurations:
 - Each Kafka broker is deployed as a separate `Deployment`.
 - Each broker has a corresponding `Service` to expose the Kafka ports.
